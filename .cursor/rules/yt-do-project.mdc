@@ -1,0 +1,62 @@
+---
+description: YT-DO project conventions for Bun, Hono, yt-dlp, and SQLite
+alwaysApply: true
+---
+
+# YT-DO Project Rules
+
+## Stack
+
+- **Runtime**: Bun (`bun run dev` / `bun run start`)
+- **HTTP**: Hono on port **9988** (configurable via `PORT`)
+- **Database**: SQLite via `bun:sqlite` — schema lives in `src/db.ts`
+- **Downloads**: Shell out to **yt-dlp** (720p mp4), never reimplement download logic
+- **Notifications**: Telegram Bot API via `fetch`
+
+## Project layout
+
+```
+src/
+  index.ts          # Server entry, mounts routes
+  config.ts         # Env loading (fail fast on missing vars)
+  db.ts             # SQLite schema + queries
+  routes/
+    api.ts          # JSON API (download, verify, stream)
+    pages.ts        # HTML admin + watch pages
+  services/
+    ytdlp.ts        # yt-dlp integration
+    telegram.ts     # Telegram messages
+  utils/
+    password.ts     # Per-video passwords + access tokens
+data/               # Gitignored — videos + yt-do.db
+```
+
+## Conventions
+
+- Use **relative imports** within `src/` (e.g. `../config`, not `@/config`)
+- Keep secrets in `.env` only — never commit `.env` or hardcode tokens
+- Video files go under `data/videos/`; metadata in SQLite (`videos` table)
+- Stream videos with **Range request** support (`206 Partial Content`) — do not serve as attachment downloads on the watch page
+- Each video gets a unique **per-video password**; admin page uses **MASTER_PASSWORD** from env
+- Public links use `BASE_URL` (subdomain), not raw IP, in Telegram messages
+- Prefer minimal diffs; match existing Hono route and HTML inline-template style
+
+## Adding features
+
+- New API routes → `src/routes/api.ts`
+- New pages → `src/routes/pages.ts`
+- DB changes → update `src/db.ts` schema + migration-safe `CREATE IF NOT EXISTS`
+- New env vars → add to `.env.example` and `src/config.ts`, document in README
+
+## Commands
+
+```bash
+bun install
+bun run dev      # hot reload
+bun run start    # production
+```
+
+## External dependencies
+
+- `yt-dlp` must be on PATH (`yt-dlp --version`)
+- Reverse proxy (Caddy/nginx) should map `BASE_URL` subdomain → `localhost:9988`

@@ -1,0 +1,40 @@
+# Secrets — never commit
+.env
+.env.*
+!.env.example
+
+# Dependencies
+node_modules/
+
+# Runtime data (SQLite, downloaded videos, auto-installed yt-dlp)
+data/
+*.db
+*.db-wal
+*.db-shm
+
+# Video / download artifacts (safety net if paths change)
+*.mp4
+*.mkv
+*.webm
+*.part
+*.ytdl
+
+# Logs
+*.log
+logs/
+
+# Bun
+.bun/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor / IDE (keep .cursor/rules if you commit project rules)
+.idea/
+*.swp
+*.swo
+*~
+
+# Local Docker / test output
+docker-data/
