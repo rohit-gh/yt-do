@@ -158,6 +158,7 @@ Defaults are fine for most setups:
 DATA_DIR=./data
 VIDEOS_DIR=./data/videos
 DB_PATH=./data/yt-do.db
+# YT_DLP_COOKIES_FILE=./data/cookies/youtube.txt
 ```
 
 ### Example complete `.env`
@@ -255,6 +256,48 @@ sqlite3 data/yt-do.db "SELECT id, title, status, password, file_path FROM videos
 
 See **[docs/COOLIFY.md](docs/COOLIFY.md)** for step-by-step deployment with Dockerfile, persistent volume, domain, and environment variables.
 
+#### YouTube cookies via Coolify terminal (`nano`)
+
+On VPS/datacenter IPs, YouTube often blocks downloads with **“Sign in to confirm you're not a bot”**. Pass browser cookies to yt-dlp.
+
+The Docker image includes **`nano`** so you can edit files from **Coolify → your app → Terminal** without SSHing into the host.
+
+1. **Export cookies** on your PC (logged into YouTube):
+   - Install **Get cookies.txt LOCALLY** (Chrome/Firefox extension)
+   - Open [youtube.com](https://youtube.com) → export **Netscape** format → save as `youtube.txt`
+
+2. **Set env var** in Coolify:
+   ```env
+   YT_DLP_COOKIES_FILE=/app/data/cookies/youtube.txt
+   ```
+
+3. **Open Coolify terminal** for the running container and create the cookies file:
+   ```bash
+   mkdir -p /app/data/cookies
+   nano /app/data/cookies/youtube.txt
+   ```
+   Paste the contents of `youtube.txt`, then save: `Ctrl+O`, Enter, `Ctrl+X`.
+
+4. **Redeploy or restart** the app. Logs should show:
+   ```text
+   [yt-dlp] Using cookies file: /app/data/cookies/youtube.txt
+   ```
+
+**Notes:**
+- Store cookies under `/app/data/` — that path is on the persistent volume and survives redeploys.
+- Treat the cookies file like a password; never commit it to git.
+- Cookies expire; re-export and edit the file when downloads start failing again.
+
+**If `nano` is missing** (old image before redeploy):
+```bash
+apt-get update && apt-get install -y nano
+```
+
+**Alternative without `nano`:** copy from your machine:
+```bash
+docker cp youtube.txt <container-id>:/app/data/cookies/youtube.txt
+```
+
 ### Manual / process manager
 
 Run with a process manager:
@@ -279,6 +322,7 @@ Ensure:
 |---------|-----|
 | `Missing required environment variable` | Fill in all required vars in `.env` |
 | `yt-dlp is not installed` | Restart the app to trigger auto-download, or install yt-dlp manually |
+| `Sign in to confirm you're not a bot` | Add YouTube cookies — see [YouTube cookies via Coolify terminal](#youtube-cookies-via-coolify-terminal-nano) |
 | Telegram message not sent | Check bot token, chat ID, and that you messaged the bot first |
 | Video won't play | Confirm status is `ready`; re-enter password; check file exists at `file_path` |
 | Link in Telegram doesn't open | Verify DNS A record and reverse proxy point to this server |

@@ -46,6 +46,8 @@ In the application **Environment Variables** tab, add:
 | `PORT` | No | `9988` | HTTP port (default `9988`) |
 | `DATA_DIR` | No | `/app/data` | Persistent data root (default in image) |
 | `YT_DLP_PATH` | No | `/app/data/bin/yt-dlp` | Override auto-download location |
+| `YT_DLP_JS_RUNTIME` | No | `bun:/usr/local/bin/bun` | JS runtime for YouTube challenge solving (set in Dockerfile) |
+| `YT_DLP_COOKIES_FILE` | **Recommended** | `/app/data/cookies/youtube.txt` | Netscape cookies file — required on most VPS/datacenter IPs |
 
 **Do not** mark these as build variables — they are only needed at runtime.
 
@@ -140,6 +142,56 @@ Coolify proxy (443) ──► container:9988 (Bun + Hono)
 
 ---
 
+## 9. YouTube cookies (required on VPS / Coolify)
+
+Datacenter IPs are often blocked with **“Sign in to confirm you're not a bot”**. Fix: pass exported YouTube cookies to yt-dlp.
+
+### Export cookies from your browser
+
+1. Install a cookies exporter extension (e.g. **Get cookies.txt LOCALLY** for Chrome/Firefox)
+2. Go to [youtube.com](https://youtube.com) while logged in
+3. Export cookies in **Netscape** format → save as `youtube.txt`
+
+### Add to the persistent volume
+
+**Option A — Coolify file manager / SFTP**
+
+Upload the file to the volume so it exists at:
+
+```text
+/app/data/cookies/youtube.txt
+```
+
+**Option B — SSH into the server**
+
+```bash
+# Find the container
+docker ps | grep yt-do
+
+# Copy from your machine
+scp youtube.txt user@your-server:/tmp/youtube.txt
+docker cp /tmp/youtube.txt <container-id>:/app/data/cookies/youtube.txt
+```
+
+### Set the env var in Coolify
+
+```env
+YT_DLP_COOKIES_FILE=/app/data/cookies/youtube.txt
+```
+
+Redeploy and check logs for:
+
+```text
+[yt-dlp] JS runtime: bun:/usr/local/bin/bun
+[yt-dlp] Using cookies file: /app/data/cookies/youtube.txt
+```
+
+Cookies expire periodically — re-export and replace the file when downloads start failing again.
+
+See [yt-dlp: passing cookies](https://github.com/yt-dlp/yt-dlp/wiki/FAQ#how-do-i-pass-cookies-to-yt-dlp) and [exporting YouTube cookies](https://github.com/yt-dlp/yt-dlp/wiki/Extractors#exporting-youtube-cookies).
+
+---
+
 ## Updating
 
 - **App code**: push to Git → Coolify redeploys (or trigger manual deploy)
@@ -158,7 +210,9 @@ Coolify proxy (443) ──► container:9988 (Bun + Hono)
 | Problem | Fix |
 |---------|-----|
 | `Missing required environment variable` | Set all required env vars in Coolify and redeploy |
-| Downloads fail / `403` from YouTube | Restart to refresh yt-dlp; ensure Node is in the image (included in Dockerfile) |
+| Downloads fail / `403` from YouTube | Set `YT_DLP_COOKIES_FILE`; re-export cookies from browser |
+| `No supported JavaScript runtime` | Redeploy with latest image (`YT_DLP_JS_RUNTIME=bun:/usr/local/bin/bun`) |
+| `Sign in to confirm you're not a bot` | Add YouTube cookies file (see section 9) |
 | `ffmpeg` merge errors | Confirm `ffmpeg` is installed (included in Dockerfile) |
 | Videos disappear after redeploy | Attach persistent volume at `/app/data` |
 | Telegram link uses wrong host | `BASE_URL` must match your public HTTPS domain |

@@ -5,8 +5,12 @@ WORKDIR /app
 # ffmpeg: merge video+audio into mp4
 # curl: optional Coolify health checks
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends nodejs ca-certificates curl ffmpeg \
+  && apt-get install -y --no-install-recommends nodejs ca-certificates curl ffmpeg nano \
+  && ln -sf /usr/bin/nodejs /usr/bin/node \
   && rm -rf /var/lib/apt/lists/*
+
+# yt-dlp needs an explicit JS runtime path in minimal containers
+ENV YT_DLP_JS_RUNTIME=bun:/usr/local/bin/bun
 
 COPY package.json bun.lock ./
 RUN bun install --frozen-lockfile --production

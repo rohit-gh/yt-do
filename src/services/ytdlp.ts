@@ -1,4 +1,4 @@
-import { chmodSync, mkdirSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { config } from "../config";
 
@@ -7,15 +7,8 @@ export interface DownloadResult {
   filePath: string;
 }
 
-/** Required by yt-dlp 2025+ for YouTube JS challenge solving. */
-const YT_DLP_YOUTUBE_ARGS = [
-  "--js-runtimes",
-  "node",
-  "--remote-components",
-  "ejs:github",
-];
-
 let resolvedYtDlpPath: string | null = null;
+let cachedYoutubeArgs: string[] | null = null;
 
 function ytDlpReleaseAsset(): string {
   switch (process.platform) {
@@ -26,6 +19,90 @@ function ytDlpReleaseAsset(): string {
     default:
       return "yt-dlp_linux";
   }
+}
+
+async function binaryRuns(binary: string, args: string[] = ["--version"]): Promise<boolean> {
+  try {
+    const proc = Bun.spawn([binary, ...args], { stdout: "pipe", stderr: "pipe" });
+    return (await proc.exited) === 0;
+  } catch {
+    return false;
+  }
+}
+
+async function whichBinary(name: string): Promise<string | null> {
+  const proc = Bun.spawn(["which", name], { stdout: "pipe", stderr: "pipe" });
+  const path = (await new Response(proc.stdout).text()).trim();
+  return (await proc.exited) === 0 && path ? path : null;
+}
+
+async function resolveJsRuntime(): Promise<string> {
+  const configured = process.env.YT_DLP_JS_RUNTIME?.trim();
+  if (configured) {
+    if (configured.includes(":")) {
+      const [name, path] = configured.split(":", 2);
+      if (!(await binaryRuns(path))) {
+        throw new Error(`YT_DLP_JS_RUNTIME binary not runnable: ${path}`);
+      }
+      return `${name}:${path}`;
+    }
+    const path = await whichBinary(configured === "nodejs" ? "nodejs" : configured);
+    if (!path) {
+      throw new Error(`YT_DLP_JS_RUNTIME command not found: ${configured}`);
+    }
+    const runtimeName = configured === "nodejs" ? "node" : configured;
+    return `${runtimeName}:${path}`;
+  }
+
+  const candidates: [string, string][] = [
+    ["bun", process.execPath],
+    ["node", "/usr/bin/node"],
+    ["node", "/usr/bin/nodejs"],
+  ];
+
+  for (const [name, path] of candidates) {
+    if (await binaryRuns(path)) {
+      return `${name}:${path}`;
+    }
+  }
+
+  for (const cmd of ["bun", "node", "nodejs"]) {
+    const path = await whichBinary(cmd);
+    if (!path) continue;
+    const runtimeName = cmd === "nodejs" ? "node" : cmd;
+    if (await binaryRuns(path)) {
+      return `${runtimeName}:${path}`;
+    }
+  }
+
+  throw new Error(
+    "No JS runtime found for yt-dlp. Install node or set YT_DLP_JS_RUNTIME (e.g. bun:/usr/local/bin/bun).",
+  );
+}
+
+async function buildYoutubeArgs(): Promise<string[]> {
+  if (cachedYoutubeArgs) return cachedYoutubeArgs;
+
+  const jsRuntime = await resolveJsRuntime();
+  const args = ["--js-runtimes", jsRuntime, "--remote-components", "ejs:github"];
+
+  if (config.ytdlpCookiesFile) {
+    if (!existsSync(config.ytdlpCookiesFile)) {
+      console.warn(`[yt-dlp] Cookies file not found: ${config.ytdlpCookiesFile}`);
+    } else {
+      args.push("--cookies", config.ytdlpCookiesFile);
+      console.log(`[yt-dlp] Using cookies file: ${config.ytdlpCookiesFile}`);
+    }
+  } else {
+    console.warn(
+      "[yt-dlp] No YT_DLP_COOKIES_FILE set — YouTube may block datacenter IPs. " +
+        "Export browser cookies and set YT_DLP_COOKIES_FILE=/app/data/cookies/youtube.txt",
+    );
+  }
+
+  console.log(`[yt-dlp] JS runtime: ${jsRuntime}`);
+  cachedYoutubeArgs = args;
+  return args;
 }
 
 async function ytDlpWorks(binary: string): Promise<boolean> {
@@ -55,6 +132,7 @@ async function downloadYtDlp(targetPath: string): Promise<void> {
 
 export async function ensureYtDlpAvailable(): Promise<string> {
   if (resolvedYtDlpPath && (await ytDlpWorks(resolvedYtDlpPath))) {
+    await buildYoutubeArgs();
     return resolvedYtDlpPath;
   }
 
@@ -67,6 +145,7 @@ export async function ensureYtDlpAvailable(): Promise<string> {
   for (const candidate of candidates) {
     if (await ytDlpWorks(candidate)) {
       resolvedYtDlpPath = candidate;
+      await buildYoutubeArgs();
       return candidate;
     }
   }
@@ -79,6 +158,7 @@ export async function ensureYtDlpAvailable(): Promise<string> {
 
   resolvedYtDlpPath = config.ytdlpPath;
   console.log(`[yt-dlp] Installed to ${config.ytdlpPath}`);
+  await buildYoutubeArgs();
   return config.ytdlpPath;
 }
 
@@ -89,9 +169,16 @@ function ytDlpBinary(): string {
   return resolvedYtDlpPath;
 }
 
+function youtubeArgs(): string[] {
+  if (!cachedYoutubeArgs) {
+    throw new Error("yt-dlp YouTube args not initialized — call ensureYtDlpAvailable() first");
+  }
+  return cachedYoutubeArgs;
+}
+
 export async function getVideoTitle(url: string): Promise<string> {
   const proc = Bun.spawn(
-    [ytDlpBinary(), ...YT_DLP_YOUTUBE_ARGS, "--print", "%(title)s", "--no-download", url],
+    [ytDlpBinary(), ...youtubeArgs(), "--print", "%(title)s", "--no-download", url],
     { stdout: "pipe", stderr: "pipe" },
   );
 
@@ -166,7 +253,7 @@ export async function downloadVideo720p(
   const proc = Bun.spawn(
     [
       ytDlpBinary(),
-      ...YT_DLP_YOUTUBE_ARGS,
+      ...youtubeArgs(),
       "-f",
       "bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/best[height<=720][ext=mp4]/best[height<=720]",
       "--merge-output-format",
